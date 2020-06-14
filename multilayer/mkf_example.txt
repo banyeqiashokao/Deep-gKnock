@@ -1,0 +1,67 @@
+source("multilayer_knockoff_filter.R")
+
+# set seed for reproducibility
+set.seed(1234)
+
+# SIMULATION PARAMETERS
+
+N = 1000                # number of samples
+n = 250                 # number of variables
+M = 2                   # number of layers
+group_size = 10         # size of groups
+non_null_groups = 10    # number of non-null groups
+non_nulls_per_group = 3 # number of non-null elements per non-null group
+SNR = 0.5               # signal-to-noise ratio
+
+# PROBLEM SETUP
+
+# create design matrix with i.i.d. Gaussian entries
+X = matrix(rnorm(N*n), N, n)
+
+# create two layers of groups, one singleton layer, and one layer containing 25 groups of size 10 each
+groups = matrix(0, n, M)
+groups[,1] = 1:n
+groups[,2] = rep(1:(n/group_size), each = group_size)
+
+# create ground truth coefficient vector beta
+beta = matrix(0, n, 1)
+non_null_idx = outer(1:non_nulls_per_group, group_size*(0:(non_null_groups-1)), "+")
+beta[non_null_idx] = 1
+
+# compute signal amplitude based on beta and SNR
+A = as.numeric(sqrt(N*SNR/(t(X%*%beta)%*%(X%*%beta))))
+
+# generate response 
+y = X%*%(A*beta) + rnorm(N)
+
+# MULTILAYER KNOCKOFF FILTER OPTIONS
+q = c(0.2, 0.2)
+knockoff_type = "fixed_equi"
+statistic_type = "group_LSM" 
+FDP_hat_type = "kn+"
+
+# RUN MULTILAYER KNOCKOFF FILTER
+output = multilayer_knockoff_filter(X, y, groups, q, knockoff_type, statistic_type, FDP_hat_type)
+
+# PRINT OUTPUT
+
+S_hat = output$S_hat # individual-layer rejection set
+S_hats_m = sapply(1:M, function(m)(unique(groups[S_hat,m]))) # rejection sets at each layer
+
+# print selection sets
+print("Selection sets:")
+for(m in 1:M){
+  cat(sprintf("Layer %d:\n", m))
+  print(S_hats_m[[m]])
+}
+
+# print summary of FDP and power
+S_hats_m_true = sapply(1:M, function(m)(unique(groups[non_null_idx,m]))) # rejection sets at each layer
+FDP = sapply(1:M, function(m)(length(setdiff(S_hats_m[[m]], S_hats_m_true[[m]]))/length(S_hats_m[[m]])))
+power = sapply(1:M, function(m)(length(intersect(S_hats_m[[m]], S_hats_m_true[[m]]))/length(S_hats_m_true[[m]])))
+layer = c(1,2)
+summary_df = data.frame(layer, FDP, power)
+print("FDP and power summary:")
+print(summary_df)
+
+
